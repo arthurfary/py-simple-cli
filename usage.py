@@ -1,10 +1,19 @@
 
 from pysimplecli import functions
 
-
-@functions.command
-def greet(name, age=10):
-    print("Hello", name, age)
+cli = functions.CLI()
 
 
-functions.run_cli()
+@cli.command
+def greet(name, punctuation="!"):
+    """Greet someone by name."""
+    print(f"Hello, {name}{punctuation}")
+
+
+@cli.main
+def default():
+    print("This is the default command. Try 'help' for available commands.")
+
+
+if __name__ == "__main__":
+    cli.run()

@@ -1,89 +1,103 @@
+
+# cli.py (refactored)
+
 import sys
 from functools import wraps
 
-_commands = {}
 
+class CLI:
+    class CliSyntaxError(Exception):
+        """Raised when CLI arguments are in wrong order."""
+        pass
 
-class CliSyntaxError(Exception):
-    """Raised when CLI arguments are in wrong order"""
-    pass
+    def __init__(self):
+        self.commands = {}
 
+    @staticmethod
+    def _parse_cli_args(argv):
+        args = []
+        kwargs = {}
+        seen_kwarg = False
+        for arg in argv:
+            if '=' in arg:
+                seen_kwarg = True
+                key, value = arg.split('=', 1)
+                kwargs[key] = value
+            else:
+                if seen_kwarg:
+                    raise CLI.CliSyntaxError(
+                        "Positional arguments must come before keyword arguments. "
+                        f"Found positional argument '{arg}' after keyword arguments."
+                    )
+                args.append(arg)
+        return args, kwargs
 
-def _parse_cli_args(argv):
-    args = []
-    kwargs = {}
+    def command(self, func):
+        """Decorator to register a CLI command."""
+        self.commands[func.__name__] = func
 
-    seen_kwarg = False
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # If called with parameters (direct call), use them
+            if args or kwargs:
+                return func(*args, **kwargs)
+            # Otherwise parse sys.argv for command parameters
+            argv = sys.argv[2:] if len(sys.argv) > 2 else []
+            parsed_args, parsed_kwargs = self._parse_cli_args(argv)
+            return func(*parsed_args, **parsed_kwargs)
+        return wrapper
 
-    for arg in argv:
-        if '=' in arg:
-            seen_kwarg = True
-            key, value = arg.split('=', 1)
-            kwargs[key] = value
-        else:
-            if seen_kwarg:
-                raise CliSyntaxError(
-                    "Positional arguments must come before keyword arguments. "
-                    f"Found positional argument '{arg}' after keyword arguments."
-                )
-            args.append(arg)
+    def main(self, func):
+        """Decorator to register the main command (used if no command is given)."""
+        self.commands["main"] = func
 
-    return args, kwargs
-
-
-def command(func):
-    """Decorator used to create cli commands.
-
-    Usage:
-
-        @command
-        def mycommand(var1, var2=None):
-            ...
-
-        # will create a cli command called 'mycommand' that has
-        # two vars as parameters
-
-    """
-    # appends func name to list of funcs
-    _commands[func.__name__] = func
-
-    @wraps(func)
-    def wrapper_func(*args, **kwargs):
-        # this allows the function to be called directly in script
-        if args or kwargs:
+        @wraps(func)
+        def wrapper(*args, **kwargs):
             return func(*args, **kwargs)
+        return wrapper
 
-        # Get arguments after the command name
-        argv = sys.argv[2:] if len(sys.argv) > 2 else []
-        args, kwargs = _parse_cli_args(argv)
-        return func(*args, **kwargs)
+    def run(self):
+        """Run the CLI by dispatching the correct command."""
+        if len(sys.argv) == 1:
+            command_name = "main"
+        else:
+            command_name = sys.argv[1]
 
-    return wrapper_func
+        if command_name == "help":
+            print("Available commands:", ", ".join(self.commands.keys()))
+            return
 
-# TODO: 1 - Make a main function replacer
-# should be able to run the cli with no parameters
-# and get something, like 'pytest' or ls
+        if command_name not in self.commands:
+            print(f"Unknown command: {command_name}")
+            print("Available commands:", ", ".join(self.commands.keys()))
+            return
+
+        try:
+            argv = sys.argv[2:]
+            args, kwargs = self._parse_cli_args(argv)
+            self.commands[command_name](*args, **kwargs)
+        except CLI.CliSyntaxError as e:
+            print(f"Error: {e}")
+        except TypeError as e:
+            # This simplistic approach extracts the missing argument's name from the error message.
+            missing_arg = str(e).split("'")[1] if "'" in str(e) else "unknown"
+            print("Missing required argument:", missing_arg)
 
 
-def run_cli():
-    """Run the CLI with the registered commands"""
-    if len(sys.argv) < 2:
-        print("Available commands:", ", ".join(_commands.keys()))
-        return
+# Example usage:
+cli = CLI()
 
-    command_name = sys.argv[1]
-    if command_name not in _commands:
-        print(f"Unknown command: {command_name}")
-        print("Available commands:", ", ".join(_commands.keys()))
-        return
 
-    try:
-        argv = sys.argv[2:]
-        args, kwargs = _parse_cli_args(argv)
-        _commands[command_name](*args, **kwargs)
+@cli.command
+def greet(name, punctuation="!"):
+    """Greet someone by name."""
+    print(f"Hello, {name}{punctuation}")
 
-    except CliSyntaxError as e:
-        print(f"Error: {str(e)}")
 
-    except TypeError as e:
-        print("Missing required argument:", str(e).split("'")[1])
+@cli.main
+def default():
+    print("This is the default command. Try 'help' for available commands.")
+
+
+if __name__ == "__main__":
+    cli.run()
